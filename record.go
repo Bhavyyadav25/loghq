@@ -48,7 +48,7 @@ func (r *Record) reset() {
 	r.Caller = CallerInfo{}
 	r.Stack = ""
 	r.nFields = 0
-	r.extra = r.extra[:0]
+	r.extra = r.extra[:0:0] // Reset length AND capacity to prevent pool memory bloat
 }
 
 // AddField appends a field to the record.
