@@ -1,6 +1,9 @@
 package loghq
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // ANSI color codes.
 const (
@@ -80,17 +83,15 @@ func (e *ConsoleEncoder) Encode(buf *Buffer, rec *Record) {
 	// Message
 	buf.AppendString(rec.Message)
 
-	// Fields
-	if rec.NumFields() > 0 {
+	// Fields — direct encoding avoids interface escape to heap
+	if nf := rec.NumFields(); nf > 0 {
 		buf.AppendString("  ")
-		fe := consoleFieldEnc{buf: buf, noColor: e.NoColor, first: true}
-		rec.EachField(func(f *Field) {
-			if !fe.first {
+		for i := 0; i < nf; i++ {
+			if i > 0 {
 				buf.AppendByte(' ')
 			}
-			fe.first = false
-			fe.encodeField(f)
-		})
+			e.encodeField(buf, rec.FieldAt(i))
+		}
 	}
 
 	// Caller
@@ -118,67 +119,39 @@ func (e *ConsoleEncoder) Encode(buf *Buffer, rec *Record) {
 	}
 }
 
-// consoleFieldEnc is a stack-local FieldEncoder for console output.
-// Created per Encode call — no shared mutable state.
-type consoleFieldEnc struct {
-	buf     *Buffer
-	noColor bool
-	first   bool
-}
-
-// encodeField dispatches the field to the correct typed method.
-// Uses a concrete receiver to avoid interface boxing (zero-alloc).
-func (e *consoleFieldEnc) encodeField(f *Field) {
-	f.Encode(e)
-}
-
-func (e *consoleFieldEnc) appendKey(key string) {
-	if e.noColor {
-		e.buf.AppendString(key)
-		e.buf.AppendByte('=')
+func (e *ConsoleEncoder) appendFieldKey(buf *Buffer, key string) {
+	if e.NoColor {
+		buf.AppendString(key)
+		buf.AppendByte('=')
 	} else {
-		e.buf.AppendString(colorDim)
-		e.buf.AppendString(key)
-		e.buf.AppendString("=" + colorReset)
+		buf.AppendString(colorDim)
+		buf.AppendString(key)
+		buf.AppendString("=" + colorReset)
 	}
 }
 
-func (e *consoleFieldEnc) EncodeString(key, val string) {
-	e.appendKey(key)
-	e.buf.AppendString(val)
-}
-
-func (e *consoleFieldEnc) EncodeInt64(key string, val int64) {
-	e.appendKey(key)
-	e.buf.AppendInt(val)
-}
-
-func (e *consoleFieldEnc) EncodeFloat64(key string, val float64) {
-	e.appendKey(key)
-	e.buf.AppendFloat(val)
-}
-
-func (e *consoleFieldEnc) EncodeBool(key string, val bool) {
-	e.appendKey(key)
-	e.buf.AppendBool(val)
-}
-
-func (e *consoleFieldEnc) EncodeDuration(key string, val time.Duration) {
-	e.appendKey(key)
-	e.buf.AppendString(val.String())
-}
-
-func (e *consoleFieldEnc) EncodeTime(key string, val time.Time) {
-	e.appendKey(key)
-	e.buf.AppendTime(val, time.RFC3339)
-}
-
-func (e *consoleFieldEnc) EncodeError(key string, msg string) {
-	e.appendKey(key)
-	e.buf.AppendString(msg)
-}
-
-func (e *consoleFieldEnc) EncodeAny(key string, val interface{}) {
-	e.appendKey(key)
-	e.buf.AppendString(formatAny(val))
+// encodeField encodes a single field directly without going through the
+// FieldEncoder interface, avoiding heap escape.
+func (e *ConsoleEncoder) encodeField(buf *Buffer, f *Field) {
+	e.appendFieldKey(buf, f.Key)
+	switch f.Type {
+	case FieldString:
+		buf.AppendString(f.Str)
+	case FieldInt64:
+		buf.AppendInt(f.Ival)
+	case FieldFloat64:
+		buf.AppendFloat(math.Float64frombits(uint64(f.Ival)))
+	case FieldBool:
+		buf.AppendBool(f.Ival == 1)
+	case FieldDuration:
+		buf.AppendString(time.Duration(f.Ival).String())
+	case FieldTime:
+		if t, ok := f.Iface.(time.Time); ok {
+			buf.AppendTime(t, time.RFC3339)
+		}
+	case FieldError:
+		buf.AppendString(f.Str)
+	case FieldAny:
+		buf.AppendString(formatAny(f.Iface))
+	}
 }

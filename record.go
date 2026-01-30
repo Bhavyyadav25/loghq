@@ -1,6 +1,7 @@
 package loghq
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -70,6 +71,35 @@ func (r *Record) AddFields(fs []Field) {
 // NumFields returns the total number of fields.
 func (r *Record) NumFields() int {
 	return r.nFields + len(r.extra)
+}
+
+// FieldAt returns a pointer to the i-th field (0-indexed).
+// Panics if i is out of range.
+func (r *Record) FieldAt(i int) *Field {
+	if i < r.nFields {
+		return &r.fields[i]
+	}
+	return &r.extra[i-r.nFields]
+}
+
+// AddKVPairs parses slog-style key-value pairs directly into the inline field
+// array. This avoids allocating an intermediate []Field slice.
+func (r *Record) AddKVPairs(kvs []interface{}) {
+	n := len(kvs)
+	for i := 0; i < n; i += 2 {
+		var key string
+		switch k := kvs[i].(type) {
+		case string:
+			key = k
+		default:
+			key = fmt.Sprint(kvs[i])
+		}
+		if i+1 >= n {
+			r.AddField(Field{Key: key, Type: FieldString, Str: "MISSING"})
+			break
+		}
+		r.AddField(toField(key, kvs[i+1]))
+	}
 }
 
 // EachField calls fn for every field in order.

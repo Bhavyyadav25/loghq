@@ -2,14 +2,19 @@ package benchmarks
 
 import (
 	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/Bhavyyadav25/loghq"
+	"github.com/rs/zerolog"
+	"github.com/sirupsen/logrus"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
 
-// --- Helpers ---
+// ============================================================
+// Helpers
+// ============================================================
 
 type discardWriteSyncer struct{}
 
@@ -31,9 +36,30 @@ func newZap() *zap.Logger {
 	return zap.New(core)
 }
 
-// --- loghq ---
+func newZerolog() zerolog.Logger {
+	return zerolog.New(io.Discard).With().Timestamp().Logger()
+}
 
-func BenchmarkLoghqDisabled(b *testing.B) {
+func newLogrus() *logrus.Logger {
+	l := logrus.New()
+	l.SetOutput(io.Discard)
+	l.SetFormatter(&logrus.JSONFormatter{})
+	l.SetLevel(logrus.InfoLevel)
+	l.SetReportCaller(false)
+	return l
+}
+
+func newSlog() *slog.Logger {
+	return slog.New(slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+}
+
+// ============================================================
+// Disabled level (should be near-zero cost)
+// ============================================================
+
+func BenchmarkDisabled_Loghq(b *testing.B) {
 	l := newLoghq()
 	l.SetLevel(loghq.ErrorLevel)
 	b.ResetTimer()
@@ -43,7 +69,50 @@ func BenchmarkLoghqDisabled(b *testing.B) {
 	}
 }
 
-func BenchmarkLoghqInfoNoFields(b *testing.B) {
+func BenchmarkDisabled_Zap(b *testing.B) {
+	l := newZap()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Debug("this is disabled")
+	}
+}
+
+func BenchmarkDisabled_Zerolog(b *testing.B) {
+	l := newZerolog().Level(zerolog.WarnLevel)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info().Msg("this is disabled")
+	}
+}
+
+func BenchmarkDisabled_Slog(b *testing.B) {
+	l := slog.New(slog.NewJSONHandler(io.Discard, &slog.HandlerOptions{
+		Level: slog.LevelWarn,
+	}))
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("this is disabled")
+	}
+}
+
+func BenchmarkDisabled_Logrus(b *testing.B) {
+	l := newLogrus()
+	l.SetLevel(logrus.WarnLevel)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("this is disabled")
+	}
+}
+
+// ============================================================
+// Info with no fields
+// ============================================================
+
+func BenchmarkInfoNoFields_Loghq(b *testing.B) {
 	l := newLoghq()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -52,7 +121,47 @@ func BenchmarkLoghqInfoNoFields(b *testing.B) {
 	}
 }
 
-func BenchmarkLoghqInfo5FieldsKV(b *testing.B) {
+func BenchmarkInfoNoFields_Zap(b *testing.B) {
+	l := newZap()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("hello world")
+	}
+}
+
+func BenchmarkInfoNoFields_Zerolog(b *testing.B) {
+	l := newZerolog()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info().Msg("hello world")
+	}
+}
+
+func BenchmarkInfoNoFields_Slog(b *testing.B) {
+	l := newSlog()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("hello world")
+	}
+}
+
+func BenchmarkInfoNoFields_Logrus(b *testing.B) {
+	l := newLogrus()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("hello world")
+	}
+}
+
+// ============================================================
+// Info with 5 fields
+// ============================================================
+
+func BenchmarkInfo5Fields_Loghq(b *testing.B) {
 	l := newLoghq()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -67,7 +176,71 @@ func BenchmarkLoghqInfo5FieldsKV(b *testing.B) {
 	}
 }
 
-func BenchmarkLoghqInfo10FieldsKV(b *testing.B) {
+func BenchmarkInfo5Fields_Zap(b *testing.B) {
+	l := newZap()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("request",
+			zap.String("method", "GET"),
+			zap.String("path", "/api/users"),
+			zap.Int("status", 200),
+			zap.Int("bytes", 1024),
+			zap.String("elapsed", "12ms"),
+		)
+	}
+}
+
+func BenchmarkInfo5Fields_Zerolog(b *testing.B) {
+	l := newZerolog()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info().
+			Str("method", "GET").
+			Str("path", "/api/users").
+			Int("status", 200).
+			Int("bytes", 1024).
+			Str("elapsed", "12ms").
+			Msg("request")
+	}
+}
+
+func BenchmarkInfo5Fields_Slog(b *testing.B) {
+	l := newSlog()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("request",
+			"method", "GET",
+			"path", "/api/users",
+			"status", 200,
+			"bytes", 1024,
+			"elapsed", "12ms",
+		)
+	}
+}
+
+func BenchmarkInfo5Fields_Logrus(b *testing.B) {
+	l := newLogrus()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.WithFields(logrus.Fields{
+			"method":  "GET",
+			"path":    "/api/users",
+			"status":  200,
+			"bytes":   1024,
+			"elapsed": "12ms",
+		}).Info("request")
+	}
+}
+
+// ============================================================
+// Info with 10 fields
+// ============================================================
+
+func BenchmarkInfo10Fields_Loghq(b *testing.B) {
 	l := newLoghq()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -87,63 +260,7 @@ func BenchmarkLoghqInfo10FieldsKV(b *testing.B) {
 	}
 }
 
-func BenchmarkLoghqWithFields(b *testing.B) {
-	l := newLoghq()
-	child := l.WithFields(loghq.Fields{"service": "api", "version": "1.0"})
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		child.Info("request", "status", 200)
-	}
-}
-
-func BenchmarkLoghqParallel(b *testing.B) {
-	l := newLoghq()
-	b.ResetTimer()
-	b.ReportAllocs()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			l.Info("parallel", "id", 42)
-		}
-	})
-}
-
-// --- zap ---
-
-func BenchmarkZapDisabled(b *testing.B) {
-	l := newZap()
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		l.Debug("this is disabled")
-	}
-}
-
-func BenchmarkZapInfoNoFields(b *testing.B) {
-	l := newZap()
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		l.Info("hello world")
-	}
-}
-
-func BenchmarkZapInfo5Fields(b *testing.B) {
-	l := newZap()
-	b.ResetTimer()
-	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
-		l.Info("request",
-			zap.String("method", "GET"),
-			zap.String("path", "/api/users"),
-			zap.Int("status", 200),
-			zap.Int("bytes", 1024),
-			zap.String("elapsed", "12ms"),
-		)
-	}
-}
-
-func BenchmarkZapInfo10Fields(b *testing.B) {
+func BenchmarkInfo10Fields_Zap(b *testing.B) {
 	l := newZap()
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -163,22 +280,121 @@ func BenchmarkZapInfo10Fields(b *testing.B) {
 	}
 }
 
-func BenchmarkZapWithFields(b *testing.B) {
-	l := newZap().With(zap.String("service", "api"), zap.String("version", "1.0"))
+func BenchmarkInfo10Fields_Zerolog(b *testing.B) {
+	l := newZerolog()
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		l.Info("request", zap.Int("status", 200))
+		l.Info().
+			Str("method", "GET").
+			Str("path", "/api/users").
+			Int("status", 200).
+			Int("bytes", 1024).
+			Str("elapsed", "12ms").
+			Str("user", "ali").
+			Str("ip", "192.168.1.1").
+			Str("ua", "Mozilla/5.0").
+			Str("ref", "https://example.com").
+			Str("rid", "abc-123").
+			Msg("request")
 	}
 }
 
-func BenchmarkZapParallel(b *testing.B) {
+func BenchmarkInfo10Fields_Slog(b *testing.B) {
+	l := newSlog()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.Info("request",
+			"method", "GET",
+			"path", "/api/users",
+			"status", 200,
+			"bytes", 1024,
+			"elapsed", "12ms",
+			"user", "ali",
+			"ip", "192.168.1.1",
+			"ua", "Mozilla/5.0",
+			"ref", "https://example.com",
+			"rid", "abc-123",
+		)
+	}
+}
+
+func BenchmarkInfo10Fields_Logrus(b *testing.B) {
+	l := newLogrus()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		l.WithFields(logrus.Fields{
+			"method":  "GET",
+			"path":    "/api/users",
+			"status":  200,
+			"bytes":   1024,
+			"elapsed": "12ms",
+			"user":    "ali",
+			"ip":      "192.168.1.1",
+			"ua":      "Mozilla/5.0",
+			"ref":     "https://example.com",
+			"rid":     "abc-123",
+		}).Info("request")
+	}
+}
+
+// ============================================================
+// Parallel (goroutine contention test)
+// ============================================================
+
+func BenchmarkParallel_Loghq(b *testing.B) {
+	l := newLoghq()
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			l.Info("parallel", "id", 42)
+		}
+	})
+}
+
+func BenchmarkParallel_Zap(b *testing.B) {
 	l := newZap()
 	b.ResetTimer()
 	b.ReportAllocs()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			l.Info("parallel", zap.Int("id", 42))
+		}
+	})
+}
+
+func BenchmarkParallel_Zerolog(b *testing.B) {
+	l := newZerolog()
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			l.Info().Int("id", 42).Msg("parallel")
+		}
+	})
+}
+
+func BenchmarkParallel_Slog(b *testing.B) {
+	l := newSlog()
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			l.Info("parallel", "id", 42)
+		}
+	})
+}
+
+func BenchmarkParallel_Logrus(b *testing.B) {
+	l := newLogrus()
+	b.ResetTimer()
+	b.ReportAllocs()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			l.WithField("id", 42).Info("parallel")
 		}
 	})
 }

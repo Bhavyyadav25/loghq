@@ -1,6 +1,9 @@
 package loghq
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // JSONEncoder writes records as JSON without using encoding/json.
 // Thread-safe: no mutable state stored between Encode calls.
@@ -60,13 +63,11 @@ func (e *JSONEncoder) Encode(buf *Buffer, rec *Record) {
 		buf.AppendByte('"')
 	}
 
-	// Fields
-	if rec.NumFields() > 0 {
-		fe := jsonFieldEnc{buf: buf}
-		rec.EachField(func(f *Field) {
-			buf.AppendByte(',')
-			f.Encode(&fe)
-		})
+	// Fields — direct encoding avoids interface escape to heap
+	for i, nf := 0, rec.NumFields(); i < nf; i++ {
+		buf.AppendByte(',')
+		f := rec.FieldAt(i)
+		e.encodeField(buf, f)
 	}
 
 	// Stack
@@ -80,57 +81,36 @@ func (e *JSONEncoder) Encode(buf *Buffer, rec *Record) {
 	buf.AppendString("}\n")
 }
 
-// jsonFieldEnc is a stack-local FieldEncoder for JSON output.
-type jsonFieldEnc struct {
-	buf *Buffer
-}
-
-func (e *jsonFieldEnc) writeKey(key string) {
-	e.buf.AppendByte('"')
-	e.buf.AppendString(key)
-	e.buf.AppendString(`":`)
-}
-
-func (e *jsonFieldEnc) EncodeString(key, val string) {
-	e.writeKey(key)
-	appendJSONString(e.buf, val)
-}
-
-func (e *jsonFieldEnc) EncodeInt64(key string, val int64) {
-	e.writeKey(key)
-	e.buf.AppendInt(val)
-}
-
-func (e *jsonFieldEnc) EncodeFloat64(key string, val float64) {
-	e.writeKey(key)
-	e.buf.AppendFloat(val)
-}
-
-func (e *jsonFieldEnc) EncodeBool(key string, val bool) {
-	e.writeKey(key)
-	e.buf.AppendBool(val)
-}
-
-func (e *jsonFieldEnc) EncodeDuration(key string, val time.Duration) {
-	e.writeKey(key)
-	appendJSONString(e.buf, val.String())
-}
-
-func (e *jsonFieldEnc) EncodeTime(key string, val time.Time) {
-	e.writeKey(key)
-	e.buf.AppendByte('"')
-	e.buf.AppendTime(val, time.RFC3339Nano)
-	e.buf.AppendByte('"')
-}
-
-func (e *jsonFieldEnc) EncodeError(key string, msg string) {
-	e.writeKey(key)
-	appendJSONString(e.buf, msg)
-}
-
-func (e *jsonFieldEnc) EncodeAny(key string, val interface{}) {
-	e.writeKey(key)
-	appendJSONString(e.buf, formatAny(val))
+// encodeField encodes a single field directly without going through the
+// FieldEncoder interface, avoiding heap escape of the receiver.
+func (e *JSONEncoder) encodeField(buf *Buffer, f *Field) {
+	// key
+	buf.AppendByte('"')
+	buf.AppendString(f.Key)
+	buf.AppendString(`":`)
+	// value
+	switch f.Type {
+	case FieldString:
+		appendJSONString(buf, f.Str)
+	case FieldInt64:
+		buf.AppendInt(f.Ival)
+	case FieldFloat64:
+		buf.AppendFloat(math.Float64frombits(uint64(f.Ival)))
+	case FieldBool:
+		buf.AppendBool(f.Ival == 1)
+	case FieldDuration:
+		appendJSONString(buf, time.Duration(f.Ival).String())
+	case FieldTime:
+		if t, ok := f.Iface.(time.Time); ok {
+			buf.AppendByte('"')
+			buf.AppendTime(t, time.RFC3339Nano)
+			buf.AppendByte('"')
+		}
+	case FieldError:
+		appendJSONString(buf, f.Str)
+	case FieldAny:
+		appendJSONString(buf, formatAny(f.Iface))
+	}
 }
 
 // --- JSON helpers ---

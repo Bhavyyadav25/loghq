@@ -2,6 +2,7 @@ package loghq
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"time"
@@ -99,9 +100,21 @@ func (l *Logger) log(lvl Level, msg string, kvs []interface{}) {
 		rec.AddFields(fieldsFromContext(l.ctx))
 	}
 
-	// Parse slog-style key-value pairs
-	if len(kvs) > 0 {
-		rec.AddFields(parseKVPairs(kvs))
+	// Parse slog-style key-value pairs directly into inline array.
+	// Inlined here to prevent kvs from escaping to heap.
+	for i := 0; i < len(kvs); i += 2 {
+		var key string
+		switch k := kvs[i].(type) {
+		case string:
+			key = k
+		default:
+			key = fmt.Sprint(kvs[i])
+		}
+		if i+1 >= len(kvs) {
+			rec.AddField(Field{Key: key, Type: FieldString, Str: "MISSING"})
+			break
+		}
+		rec.AddField(toField(key, kvs[i+1]))
 	}
 
 	// Caller capture (skip 3 frames: log -> Trace/Info/etc -> user code)
